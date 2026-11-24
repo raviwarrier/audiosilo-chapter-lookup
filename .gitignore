@@ -1,0 +1,62 @@
+# Environment variables (never commit real credentials)
+.env
+
+# Personal / generated output files (not for commit)
+no_chapters.txt
+unprocessed_titles.txt
+detailed_chapters.txt
+defunct/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+lib/
+lib64/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# SQLite database and dry-run output
+data/*.sqlite3
+data/dryrun/*.txt
+data/backups/*.bak
+
+# Test artifacts
+tests/fixtures/*.sqlite3
+tests/__pycache__/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
