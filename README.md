@@ -100,3 +100,7 @@ After a batch run, check `unprocessed_titles.txt` for books that couldn't be
 processed (no ASIN, no chapters on Audnexus, or rescan failure).
 
 MIT License. Copyright (c) 2026.
+
+## Vibe-Coding Disclaimer
+
+This entire project was developed by AI coding agents with inputs from and testing by me. It made mistakes along the way and I tried to correct its course throughout the development. While I have thoroughly testing it on my server in my environment, I would urge you to look through the code (or ask your AI coding agent to do so) for validity and security issues.
