@@ -4,54 +4,50 @@ An independent Python CLI sidecar that finds and adds chapters to AudioSilo
 audiobooks without running Whisper/Bridge transcription. Designed for
 AudioSilo 2.6.0.
 
-## Limitations (as of AudioSilo 2.6.0)
+## The Problem
 
-The AudioSilo server does **not** expose a verified chapter-write endpoint in
-2.6.0. This sidecar therefore works around the limitation in two ways:
+AudioSilo 2.6.0 only offers two ways to get chapters for a book:
 
-1. **chapters.json sidecar + rescan trigger** — Writes
-   `.audiosilo/chapters.json` next to the audio file using the schema AudioSilo
-   expects (`version`, `files[]` with real `size`, `chapters[]` with
-   `title`/`start_ms`/`length_ms`), then calls the admin rescan endpoint so the
-   server ingests the sidecar. This is the default and recommended path.
+1. **Community chapters** — If another user has already contributed chapters
+   for that specific recording, they appear automatically. Most books don't
+   have community chapters.
+2. **Bridge transcription** — The Bridge runs Whisper speech recognition on
+   the audio to detect chapter boundaries. This is resource-intensive and
+   takes 20–45 minutes per book.
 
-2. **Direct database write** — The `direct_write` module exists for testing
-   only (writes directly to AudioSilo's SQLite database). It is disabled by
-   default (`DIRECT_WRITE_ENABLED=false`) and should not be used in production.
+For books without community chapters, you're stuck waiting 20–45 minutes per
+book for Bridge to transcribe the audio just to find chapter boundaries.
 
-The `PUT /book/chapters` API endpoint referenced in the spec exists only in
-unreleased main. Until it ships, the sidecar flow above is the working method.
+## What This Sidecar Does
 
-## Why this was necessary
+Instead of running Whisper transcription, this sidecar looks up chapters from
+**Audnexus** (a public chapter database) using the book's ASIN. It then writes
+a `.audiosilo/chapters.json` sidecar file next to the audiobook and triggers
+an AudioSilo rescan so the server ingests the chapters.
 
-AudioSilo's server/bridge does not scan for or ingest user-supplied
-`chapters.json` files automatically. The bridge's chapter detection is
-transcription-based (Whisper), which this sidecar deliberately avoids per the
-safety rules. The only reliable path to get chapters into AudioSilo 2.6.0
-without transcription is to write the `chapters.json` sidecar with correct
-file metadata (especially `files[].size`) and trigger a rescan.
+This is the third option: **external chapter lookup** — no transcription, no
+Bridge, no 20–45 minute wait per book.
 
-## ASIN lookup from Audible
+## How It Works
 
-Some books in your library may not have an ASIN in their AudioSilo record.
-In that case, `process_book.py` automatically queries the
-[Audible catalogue API](https://api.audible.com/1.0/catalog/products)
-by title and author to find a matching ASIN. If found, it proceeds with the
-chapter lookup from Audnexus using that ASIN. If no ASIN is found, the book is
-skipped and recorded in `unprocessed_titles.txt` with status `no_asin`.
+1. Find the book in your AudioSilo library by title/author
+2. Look up the book's ASIN (if not already in the record, search the Audible
+   catalogue)
+3. Fetch chapters from Audnexus using the ASIN
+4. Write `.audiosilo/chapters.json` next to the audio file with correct file
+   size metadata
+5. Trigger an AudioSilo library rescan via the admin API
 
-## Steps to configure, install and run
+## Steps to Configure, Install and Run
 
 ### 1. Configure
 
 ```powershell
-# Copy the example env and fill in your values
 copy .env.example .env
-# Edit .env with your AudioSilo API token and library ID
 notepad .env
 ```
 
-Key settings in `.env`:
+Key settings:
 
 | Setting | Meaning |
 |---|---|
@@ -59,23 +55,20 @@ Key settings in `.env`:
 | `AUDIOSILO_API_TOKEN` | Admin API token |
 | `AUDIOSILO_LIBRARY_ID` | Your audiobook library ID |
 | `AUDNEXUS_REGION` | Audnexus region (default `US`) |
-| `DRY_RUN` | `true` = dry-run only; `false` = update AudioSilo |
+| `DRY_RUN` | `true` = test only; `false` = update AudioSilo |
 
 ### 2. Install
 
 ```powershell
-# Create and activate a virtual environment
 python -m venv venv
 venv\Scripts\Activate.ps1
-
-# Install dependencies
 pip install -e .
 ```
 
-### 3. Process books (auto-extract + batch)
+### 3. Run
 
-The simplest way: run with no arguments. This extracts a fresh `no_chapters`
-list from AudioSilo's health API and batch-processes every book in it:
+**Auto mode (recommended):** Extracts books missing chapters from AudioSilo's
+health API and processes them all:
 
 ```powershell
 python process_book.py
@@ -89,31 +82,21 @@ python process_book.py --file no_chapters.txt
 ```
 
 **Single book:**
+
 ```powershell
 python process_book.py --title "Book Title" --author "Author Name"
 ```
 
 **Batch from an existing list file:**
+
 ```powershell
 python process_book.py --file no_chapters.txt
 # or equivalently: --batch-file no_chapters.txt
 ```
 
-## Vibe-coded disclaimer
+### 4. Review Results
 
-This project was developed with AI assistance (Claude Code). While the core
-logic has been tested against a live AudioSilo 2.6.0 instance, AudioSilo API
-endpoints and field names are candidate implementations that must be verified
-against your running server. Always back up your AudioSilo database before
-running batch writes.
+After a batch run, check `unprocessed_titles.txt` for books that couldn't be
+processed (no ASIN, no chapters on Audnexus, or rescan failure).
 
-## License
-
-MIT License — Copyright (c) 2026. Permission is hereby granted, free of
-charge, to any person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the Software without
-restriction, including without limitation the rights to use, copy, modify,
-merge, publish, distribute, sublicense, and/or sell copies of the Software,
-and to permit persons to whom the Software is furnished to do so, subject to
-the following conditions: the above copyright notice and this permission
-notice shall be included in all copies or substantial portions of the Software.
+MIT License. Copyright (c) 2026.
