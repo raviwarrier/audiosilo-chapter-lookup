@@ -18,6 +18,12 @@ from extract_no_chapters import extract_no_chapters
 
 AUDIOBOOKS_ROOT = Path("B:/Audiobooks")
 
+try:
+    import imageio_ffmpeg
+    FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+except ImportError:
+    FFMPEG_PATH = "ffmpeg"
+
 
 def _normalize_text(value: str) -> str:
     if not value:
@@ -88,44 +94,55 @@ def find_asin_audible(title: str, author: str) -> str | None:
     return None
 
 
-def fetch_chapters_from_audnexus(asin: str, region: str = "US") -> list[Chapter] | None:
-    url = "https://api.audnex.us/books/" + asin.upper() + "/chapters"
-    params = {"region": region.lower()}
+def fetch_chapters_from_audnexus(asin: str, region: str = "uk") -> list[Chapter] | None:
+    for try_region in ["uk", "us", "ca", "au", "de", "es", "fr", "in", "it", "jp"]:
+        url = "https://api.audnex.us/books/" + asin.upper() + "/chapters"
+        params = {"region": try_region}
 
-    time.sleep(0.15)
+        time.sleep(0.15)
 
-    resp = requests.get(url, params=params, timeout=30)
-    if resp.status_code == 404:
-        return None
-    if resp.status_code == 429:
-        retry_after = float(resp.headers.get("Retry-After", "5"))
-        print("  Rate limited, waiting " + str(retry_after) + "s...")
-        time.sleep(retry_after)
-        resp = requests.get(url, params=params, timeout=30)
-    resp.raise_for_status()
-
-    data = resp.json()
-    chapters_data = data.get("chapters", [])
-    if not chapters_data:
-        return None
-
-    chapters = []
-    for item in chapters_data:
-        start_ms = item.get("startOffsetMs")
-        length_ms = item.get("lengthMs")
-        if start_ms is None or length_ms is None:
+        try:
+            resp = requests.get(url, params=params, timeout=30)
+        except Exception as exc:
+            print("  Audnexus request error (" + try_region + "): " + str(exc))
             continue
-        start = float(start_ms) / 1000.0
-        end = start + (float(length_ms) / 1000.0)
-        chapters.append(
-            Chapter(
-                title=(item.get("title") or "").strip() or f"Chapter {len(chapters) + 1}",
-                start_seconds=start,
-                end_seconds=end,
-            )
-        )
 
-    return chapters if chapters else None
+        if resp.status_code == 404:
+            continue
+        if resp.status_code == 429:
+            retry_after = float(resp.headers.get("Retry-After", "5"))
+            print("  Rate limited, waiting " + str(retry_after) + "s...")
+            time.sleep(retry_after)
+            resp = requests.get(url, params=params, timeout=30)
+        if resp.status_code != 200:
+            continue
+
+        data = resp.json()
+        chapters_data = data.get("chapters", [])
+        if not chapters_data:
+            continue
+
+        chapters = []
+        for item in chapters_data:
+            start_ms = item.get("startOffsetMs")
+            length_ms = item.get("lengthMs")
+            if start_ms is None or length_ms is None:
+                continue
+            start = float(start_ms) / 1000.0
+            end = start + (float(length_ms) / 1000.0)
+            chapters.append(
+                Chapter(
+                    title=(item.get("title") or "").strip() or f"Chapter {len(chapters) + 1}",
+                    start_seconds=start,
+                    end_seconds=end,
+                )
+            )
+
+        if chapters:
+            print("  Found chapters in region: " + try_region)
+            return chapters if chapters else None
+
+    return None
 
 
 def write_chapters_txt(chapters: list[Chapter], output_path: Path) -> None:
@@ -147,14 +164,13 @@ def embed_chapters_ffmpeg(m4b_path: Path, chapters_txt: Path) -> bool:
     output_path = Path(str(m4b_path) + ".tmp.m4b")
 
     cmd = [
-        "ffmpeg",
+        FFMPEG_PATH,
         "-y",
         "-i", str(m4b_path),
         "-i", str(chapters_txt),
         "-map", "0",
-        "-map", "1",
+        "-map_metadata", "1",
         "-c", "copy",
-        "-c:s", "srt",
         "-f", "mp4",
         str(output_path),
     ]
@@ -165,6 +181,7 @@ def embed_chapters_ffmpeg(m4b_path: Path, chapters_txt: Path) -> bool:
             capture_output=True,
             text=True,
             timeout=300,
+            errors="replace",
         )
     except subprocess.TimeoutExpired:
         print("  ffmpeg timed out (>300s)")
@@ -198,6 +215,8 @@ def process_book_with_asin(
     chapters: list[Chapter],
     duration: float,
 ) -> tuple[int, str]:
+    import shutil
+
     title = book.get("title", "Unknown")
     author = book.get("author", "Unknown")
 
@@ -230,8 +249,7 @@ def process_book_with_asin(
 
     backup_path = Path(str(m4b_path) + ".bak")
     if not backup_path.exists():
-        import shutil
-        shutil.copy2(m4b_path, backup_path)
+        shutil.copy2(str(m4b_path), str(backup_path))
         print("  Backup created: " + str(backup_path.name))
 
     print("  Embedding chapters via ffmpeg...")
@@ -244,11 +262,11 @@ def process_book_with_asin(
 
     if not success:
         try:
-            shutil.copy2(backup_path, m4b_path)
+            shutil.copy2(str(backup_path), str(m4b_path))
             print("  Restored original from backup")
         except Exception as exc:
             print("  Failed to restore backup: " + str(exc))
-        return 1, "write_failed"
+            return 1, "write_failed"
 
     try:
         backup_path.unlink()
